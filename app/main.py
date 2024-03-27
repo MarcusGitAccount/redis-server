@@ -14,8 +14,9 @@ def handle_client(client_socket, client_address):
                 print(f"Connection closed by client: {client_address}")
                 break
 
-            data = request.decode()
-            print(f"Received from {client_address}: {data}")
+            data: str = request.decode()
+            tokens: list[str] = data.split('\r\n')
+            print(f"Received from {client_address}: {tokens}")
 
             if "ping" in data.lower():
                 client_socket.send("+PONG\r\n".encode())
