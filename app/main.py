@@ -15,7 +15,6 @@ def main():
         # print(data)
         if "ping" in data.lower():
             client_socket.send("+PONG\r\n".encode())
-            break
 
 
 if __name__ == "__main__":
