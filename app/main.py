@@ -5,6 +5,7 @@ import argparse
 import random
 import string
 
+from pprint import pprint
 from dataclasses import dataclass, field, asdict
 
 
@@ -41,8 +42,8 @@ def decode_resp(data, start_index=0) -> tuple[list, int]:
 
 
 def encode_resp(data: object) -> str:
-    if isinstance(data, str):  # Simple String
-        return f"+{data}\r\n"
+    if isinstance(data, str):  # Bulk String
+        return f"${len(data)}\r\n{data}\r\n"
     elif isinstance(data, Exception):  # Error
         return f"-{str(data)}\r\n"
     elif isinstance(data, int):  # Integer
@@ -52,11 +53,11 @@ def encode_resp(data: object) -> str:
     elif isinstance(data, bytes):  # Bulk String from bytes
         return f"${len(data)}\r\n{data.decode('utf-8')}\r\n"
     elif isinstance(data, list):  # Array
-        encoded_elements = "".join([encode_resp(element) for element in data])
+        encoded_elements = ''.join([encode_resp(element) for element in data])
         return f"*{len(data)}\r\n{encoded_elements}"
     else:
-        # Encode a Python string as a Bulk String
-        return f"${len(data)}\r\n{data}\r\n"
+        raise TypeError(f"Unsupported data type: {type(data)}")
+        
 
 
 def unix_timestamp() -> int:
@@ -169,7 +170,20 @@ def handle_client(
     client_socket.close()
 
 
-def main():
+def send_message_to_master(message: str, server_info: tuple[str, int]) -> str:
+    """
+    Assumess message is RESP encoded
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # tcp over ipv4
+        sock.connect(server_info)
+        sock.sendall(message.encode("utf-8"))
+        response: bytes = sock.recv(512)
+
+        print(f"Master responded with {response.decode}")
+    return response
+
+
+def start_redis_server():
     parser = argparse.ArgumentParser(description="Example script.")
     parser.add_argument(
         "--port", help="Redis server port, defaults to 6379", default=6379, type=int
@@ -180,13 +194,24 @@ def main():
         metavar=("HOST", "PORT"),
         nargs=2,
         default=None,
-        type=type[str],
+        type=str,
     )
     args = parser.parse_args()
 
     role: str = MASTER_REPLICATION
     if args.replicaof is not None:
+        host, port_str = args.replicaof
+        try:
+            port = int(port_str)
+        except ValueError:
+            parser.error("PORT must be an integer")
+
         role = SLAVE_REPLICATION
+        master_info: tuple[str, int] = (host, port)
+
+        print("Server is in [SLAVE] mode, will try to connect to master...")
+        print(f"Pinging master over: {master_info}")
+        send_message_to_master(encode_resp(["PING"]), master_info)
 
     replication_info = ReplicationInfo(role=role)
 
@@ -214,7 +239,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    start_redis_server()
     # print(parse_resp(":-123\r\n"))
     # resp: str ='\r\n'.join(['*2', '$4', 'echo', '$5', 'mango', ''])
     # print(resp)
@@ -222,8 +247,8 @@ if __name__ == "__main__":
     # print(parse_resp('*1\r\n$4\r\nping\r\n'))
     # print(encode_resp(None))
 
-"""
-                 1711644520407554
-expiry_timestamp=1711644520407654
-                 1711644520410214
-"""
+    """
+                    1711644520407554
+    expiry_timestamp=1711644520407654
+                    1711644520410214
+    """
