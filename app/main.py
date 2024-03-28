@@ -1,6 +1,8 @@
 import socket
 import threading
 import time
+import argparse
+
 from dataclasses import dataclass, field
 
 
@@ -136,13 +138,16 @@ def handle_client(
 
 
 def main():
-    print("Logs from your program will appear here!")
+    parser = argparse.ArgumentParser(description="Example script.")
+    parser.add_argument("--port", help="Redis server port, defaults to 6379", default=6379, type=int)
+    args = parser.parse_args()
 
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+
+    server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
     server_socket.listen()
     threads = []
 
-    print("Server is listening for connections...")
+    print(f"Server is listening for connections on port {args.port}...")
 
     try:
         while True:
@@ -152,6 +157,7 @@ def main():
                 args=(client_socket, client_address),
             )
             client_thread.start()
+            client_thread.daemon = True # daemon threads are killed automatically when the main program exits
             threads.append(client_thread)
     finally:
         server_socket.close()
