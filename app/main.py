@@ -169,7 +169,20 @@ def handle_client(
     client_socket.close()
 
 
-def main():
+def send_message_to_master(message: str, server_info: tuple[str, int]) -> str:
+    """
+    Assumess message is RESP encoded
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # tcp over ipv4
+        sock.connect(server_info)
+        sock.sendall(message.encode("utf-8"))
+        response: bytes = sock.recv(512)
+
+        print(f"Master responded with {response.decode}")
+    return response
+
+
+def start_redis_server():
     parser = argparse.ArgumentParser(description="Example script.")
     parser.add_argument(
         "--port", help="Redis server port, defaults to 6379", default=6379, type=int
@@ -180,13 +193,16 @@ def main():
         metavar=("HOST", "PORT"),
         nargs=2,
         default=None,
-        type=type[str],
+        type=tuple[str, int],
     )
     args = parser.parse_args()
 
     role: str = MASTER_REPLICATION
     if args.replicaof is not None:
         role = SLAVE_REPLICATION
+        print("Server is in [SLAVE] mode, will try to connect to master...")
+        print(f"Pinging master over: {args.replicaof}")
+        send_message_to_master(encode_resp("PING"), args.replicaof)
 
     replication_info = ReplicationInfo(role=role)
 
@@ -214,7 +230,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    start_redis_server()
     # print(parse_resp(":-123\r\n"))
     # resp: str ='\r\n'.join(['*2', '$4', 'echo', '$5', 'mango', ''])
     # print(resp)
