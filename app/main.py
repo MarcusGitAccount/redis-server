@@ -56,10 +56,10 @@ def encode_resp(data: object) -> str:
 
 
 def unix_timestamp() -> int:
-    return int(time.time_ns() / 1_000)
+    return int(time.time_ns() // 1_000_000) # miliseconds
 
 
-MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000_000
+MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000
 
 
 @dataclass
@@ -168,3 +168,9 @@ if __name__ == "__main__":
     # print(parse_resp(resp))
     # print(parse_resp('*1\r\n$4\r\nping\r\n'))
     # print(encode_resp(None))
+
+"""
+                 1711644520407554
+expiry_timestamp=1711644520407654
+                 1711644520410214
+"""
