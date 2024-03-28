@@ -3,10 +3,10 @@ import threading
 import time
 import argparse
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 
-def parse_resp(data, start_index=0) -> tuple[list, int]:
+def decode_resp(data, start_index=0) -> tuple[list, int]:
     data_type = data[start_index]
     # Determine the end of the current segment based on the data type
     end_index = data.find("\r\n", start_index)
@@ -30,7 +30,7 @@ def parse_resp(data, start_index=0) -> tuple[list, int]:
         elements = []
         current_index = end_index + 2
         for _ in range(count):
-            element, next_index = parse_resp(data, current_index)
+            element, next_index = decode_resp(data, current_index)
             elements.append(element)
             current_index = next_index
         return elements, current_index
@@ -58,10 +58,23 @@ def encode_resp(data: object) -> str:
 
 
 def unix_timestamp() -> int:
-    return int(time.time_ns() // 1_000_000) # miliseconds
+    return int(time.time_ns() // 1_000_000)  # miliseconds
 
 
 MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000
+
+
+@dataclass
+class RedisInfo:
+    role: str
+    connected_slaves: int
+    master_replid: str
+    master_repl_offset: int
+    second_repl_offset: int
+    repl_backlog_active: int
+    repl_backlog_size: int
+    repl_backlog_first_byte_offset: int
+    repl_backlog_histlen: int = 0
 
 
 @dataclass
@@ -93,15 +106,15 @@ def handle_client(
                 break
 
             data: str = request.decode()
-            data_decoded, _ = parse_resp(data)
+            data_decoded, _ = decode_resp(data)
             command: str = data_decoded[0].lower()
             print(f"Received from {client_address}: {data_decoded} at {timestamp}")
 
-            response: str = encode_resp(None)
+            multipart_response: list[str] = [encode_resp(None)]
             if "ping" == command:
-                response = encode_resp("PONG")
+                multipart_response = [encode_resp("PONG")]
             elif "echo" == command:
-                response = encode_resp(data_decoded[1])
+                multipart_response = [encode_resp(data_decoded[1])]
             elif "set" == command:
                 key: str = data_decoded[1]
                 value: object = data_decoded[2]
@@ -113,7 +126,7 @@ def handle_client(
                 with lock:
                     database[key] = ValueItem(value, expiry_timestamp)
 
-                response = encode_resp("OK")
+                multipart_response = [encode_resp("OK")]
             elif "get" == command:
                 key: str = data_decoded[1]
                 with lock:
@@ -126,9 +139,10 @@ def handle_client(
                         value_item = not_found
                         del database[key]
 
-                response = encode_resp(value_item.value)
+                multipart_response = [encode_resp(value_item.value)]
 
-            client_socket.send(response.encode())
+            for part in multipart_response:
+                client_socket.send(part.encode("utf-8"))
 
         except Exception as e:
             print(f"Error with {client_address}: {e}")
@@ -139,7 +153,9 @@ def handle_client(
 
 def main():
     parser = argparse.ArgumentParser(description="Example script.")
-    parser.add_argument("--port", help="Redis server port, defaults to 6379", default=6379, type=int)
+    parser.add_argument(
+        "--port", help="Redis server port, defaults to 6379", default=6379, type=int
+    )
     args = parser.parse_args()
 
     server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
@@ -155,7 +171,7 @@ def main():
                 target=handle_client,
                 args=(client_socket, client_address),
             )
-            client_thread.daemon = True # daemon threads are killed automatically when the main program exits
+            client_thread.daemon = True  # daemon threads are killed automatically when the main program exits
             client_thread.start()
             threads.append(client_thread)
     finally:
