@@ -3,10 +3,10 @@ import threading
 import time
 import argparse
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 
-def parse_resp(data, start_index=0) -> tuple[list, int]:
+def decode_resp(data, start_index=0) -> tuple[list, int]:
     data_type = data[start_index]
     # Determine the end of the current segment based on the data type
     end_index = data.find("\r\n", start_index)
@@ -30,7 +30,7 @@ def parse_resp(data, start_index=0) -> tuple[list, int]:
         elements = []
         current_index = end_index + 2
         for _ in range(count):
-            element, next_index = parse_resp(data, current_index)
+            element, next_index = decode_resp(data, current_index)
             elements.append(element)
             current_index = next_index
         return elements, current_index
@@ -58,10 +58,30 @@ def encode_resp(data: object) -> str:
 
 
 def unix_timestamp() -> int:
-    return int(time.time_ns() // 1_000_000) # miliseconds
+    return int(time.time_ns() // 1_000_000)  # miliseconds
+
+
+def serialize_dataclass(instance) -> list[str]:
+    data_dict = asdict(instance)
+    return [f"{key}:{value}" for key, value in data_dict.items()]
 
 
 MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000
+MASTER_REPLICATION: str = "master"
+SLAVE_REPLICATION: str = "slave"
+
+
+@dataclass
+class ReplicationInfo:
+    role: str = MASTER_REPLICATION
+    # connected_slaves: int
+    # master_replid: str
+    # master_repl_offset: int
+    # second_repl_offset: int
+    # repl_backlog_active: int
+    # repl_backlog_size: int
+    # repl_backlog_first_byte_offset: int
+    # repl_backlog_histlen: int = 0
 
 
 @dataclass
@@ -71,13 +91,14 @@ class ValueItem:
 
 
 not_found = ValueItem(None, None)
-lock = threading.Lock()
+database_lock = threading.Lock()
 database: dict[str, ValueItem] = dict()
 
 
 def handle_client(
-    client_socket,
-    client_address,
+    client_socket: socket,
+    client_address: str,
+    replication_info: ReplicationInfo
 ) -> None:
     print(f"New connection: {client_address}")
 
@@ -93,15 +114,15 @@ def handle_client(
                 break
 
             data: str = request.decode()
-            data_decoded, _ = parse_resp(data)
+            data_decoded, _ = decode_resp(data)
             command: str = data_decoded[0].lower()
             print(f"Received from {client_address}: {data_decoded} at {timestamp}")
 
-            response: str = encode_resp(None)
+            multipart_response: list[str] = [encode_resp(None)]
             if "ping" == command:
-                response = encode_resp("PONG")
+                multipart_response = [encode_resp("PONG")]
             elif "echo" == command:
-                response = encode_resp(data_decoded[1])
+                multipart_response = [encode_resp(data_decoded[1])]
             elif "set" == command:
                 key: str = data_decoded[1]
                 value: object = data_decoded[2]
@@ -110,13 +131,13 @@ def handle_client(
                 if len(data_decoded) == 5 and "px" == data_decoded[3]:
                     expiry_timestamp = int(data_decoded[4]) + timestamp
 
-                with lock:
+                with database_lock:
                     database[key] = ValueItem(value, expiry_timestamp)
 
-                response = encode_resp("OK")
+                multipart_response = [encode_resp("OK")]
             elif "get" == command:
                 key: str = data_decoded[1]
-                with lock:
+                with database_lock:
                     value_item: ValueItem = database.get(key, not_found)
                     print(value_item)
                     if (
@@ -126,9 +147,15 @@ def handle_client(
                         value_item = not_found
                         del database[key]
 
-                response = encode_resp(value_item.value)
+                multipart_response = [encode_resp(value_item.value)]
+            elif "info" == command:
+                multipart_response = [
+                    encode_resp(key_val)
+                    for key_val in serialize_dataclass(replication_info)
+                ]
 
-            client_socket.send(response.encode())
+            for part in multipart_response:
+                client_socket.send(part.encode("utf-8"))
 
         except Exception as e:
             print(f"Error with {client_address}: {e}")
@@ -139,8 +166,12 @@ def handle_client(
 
 def main():
     parser = argparse.ArgumentParser(description="Example script.")
-    parser.add_argument("--port", help="Redis server port, defaults to 6379", default=6379, type=int)
+    parser.add_argument(
+        "--port", help="Redis server port, defaults to 6379", default=6379, type=int
+    )
     args = parser.parse_args()
+
+    replication_info = ReplicationInfo(role=MASTER_REPLICATION)
 
     server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
     server_socket.listen()
@@ -153,9 +184,9 @@ def main():
             client_socket, client_address = server_socket.accept()  # wait for client
             client_thread = threading.Thread(
                 target=handle_client,
-                args=(client_socket, client_address),
+                args=(client_socket, client_address, replication_info),
             )
-            client_thread.daemon = True # daemon threads are killed automatically when the main program exits
+            client_thread.daemon = True  # daemon threads are killed automatically when the main program exits
             client_thread.start()
             threads.append(client_thread)
     finally:
