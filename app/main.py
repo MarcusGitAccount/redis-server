@@ -152,6 +152,7 @@ def main():
                 args=(client_socket, client_address),
             )
             client_thread.start()
+            client_thread.daemon = True # daemon threads are killed automatically when the main program exits
             threads.append(client_thread)
     finally:
         server_socket.close()
