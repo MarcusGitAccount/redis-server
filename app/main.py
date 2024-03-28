@@ -158,6 +158,8 @@ def handle_client(
                 multipart_response = [
                     encode_resp("\n".join(serialize_dataclass(replication_info)))
                 ]
+            elif "replconf" == command:
+                multipart_response = [encode_resp("OK")]
 
             for part in multipart_response:
                 client_socket.send(part.encode("utf-8"))
