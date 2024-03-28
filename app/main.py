@@ -1,5 +1,7 @@
 import socket
 import threading
+import time
+from dataclasses import dataclass, field
 
 
 def parse_resp(data, start_index=0) -> tuple[list, int]:
@@ -53,17 +55,36 @@ def encode_resp(data: object) -> str:
         return f"${len(data)}\r\n{data}\r\n"
 
 
+def unix_timestamp() -> int:
+    return int(time.time_ns() / 1_000)
+
+
+MAX_32BIT_TIMESTAMP = 2**31 - 1
+
+
+@dataclass
+class ValueItem:
+    value: object
+    expiry_timestamp: int = field(init=True, default=MAX_32BIT_TIMESTAMP)
+
+
+not_found = ValueItem(None, None)
 lock = threading.Lock()
-database: dict[str, object] = dict()
+database: dict[str, ValueItem] = dict()
 
 
-def handle_client(client_socket, client_address):
+def handle_client(
+    client_socket,
+    client_address,
+) -> None:
     print(f"New connection: {client_address}")
 
     while True:
         try:
             # Receive data from client
             request = client_socket.recv(128)
+            timestamp: int = unix_timestamp()  # client sent data, get timestamp
+
             if not request:
                 # No more data from client, close connection
                 print(f"Connection closed by client: {client_address}")
@@ -72,7 +93,7 @@ def handle_client(client_socket, client_address):
             data: str = request.decode()
             data_decoded, _ = parse_resp(data)
             command: str = data_decoded[0].lower()
-            print(f"Received from {client_address}: {data_decoded}")
+            print(f"Received from {client_address}: {data_decoded} at {timestamp}")
 
             response: str = encode_resp(None)
             if "ping" == command:
@@ -82,14 +103,28 @@ def handle_client(client_socket, client_address):
             elif "set" == command:
                 key: str = data_decoded[1]
                 value: object = data_decoded[2]
+                expiry_timestamp: int = MAX_32BIT_TIMESTAMP
+
+                if len(data_decoded) == 5 and "px" == data_decoded[3]:
+                    expiry_timestamp = data_decoded[4]
+
                 with lock:
-                    database[key] = value
-                response = encode_resp('OK')
+                    database[key] = ValueItem(value, expiry_timestamp)
+
+                response = encode_resp("OK")
             elif "get" == command:
                 key: str = data_decoded[1]
                 with lock:
-                    value: object = database.get(key, None)
-                response = encode_resp(value)
+                    value_item: ValueItem = database.get(key, not_found)
+                    print(value_item)
+                    if (
+                        value_item.expiry_timestamp is not None
+                        and timestamp >= value_item.expiry_timestamp
+                    ):
+                        value_item = not_found
+                        del database[key]
+
+                response = encode_resp(value_item.value)
 
             client_socket.send(response.encode())
 
