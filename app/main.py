@@ -2,6 +2,8 @@ import socket
 import threading
 import time
 import argparse
+import secrets
+import string
 
 from dataclasses import dataclass, field, asdict
 
@@ -66,6 +68,12 @@ def serialize_dataclass(instance) -> list[str]:
     return [f"{key}:{value}" for key, value in data_dict.items()]
 
 
+def random_str(n: int = 40) -> str:
+    characters = string.ascii_letters + string.digits
+    random_str = "".join(secrets.choice(n) for _ in range(40))
+    return random_str
+
+
 MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000
 MASTER_REPLICATION: str = "master"
 SLAVE_REPLICATION: str = "slave"
@@ -75,8 +83,8 @@ SLAVE_REPLICATION: str = "slave"
 class ReplicationInfo:
     role: str = MASTER_REPLICATION
     # connected_slaves: int
-    # master_replid: str
-    # master_repl_offset: int
+    master_replid: str = field(default_factory=random_str)
+    master_repl_offset: int = 0
     # second_repl_offset: int
     # repl_backlog_active: int
     # repl_backlog_size: int
