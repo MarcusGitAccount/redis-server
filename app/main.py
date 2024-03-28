@@ -2,7 +2,7 @@ import socket
 import threading
 import time
 import argparse
-import secrets
+import random
 import string
 
 from dataclasses import dataclass, field, asdict
@@ -70,7 +70,7 @@ def serialize_dataclass(instance) -> list[str]:
 
 def random_str(n: int = 40) -> str:
     characters = string.ascii_letters + string.digits
-    random_str = "".join(secrets.choice(n) for _ in range(40))
+    random_str = "".join(random.choice(characters) for _ in range(n))
     return random_str
 
 
@@ -156,8 +156,7 @@ def handle_client(
                 multipart_response = [encode_resp(value_item.value)]
             elif "info" == command:
                 multipart_response = [
-                    encode_resp(key_val)
-                    for key_val in serialize_dataclass(replication_info)
+                    encode_resp("\n".join(serialize_dataclass(replication_info)))
                 ]
 
             for part in multipart_response:
