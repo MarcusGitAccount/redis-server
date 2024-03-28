@@ -96,9 +96,7 @@ database: dict[str, ValueItem] = dict()
 
 
 def handle_client(
-    client_socket: socket,
-    client_address: str,
-    replication_info: ReplicationInfo
+    client_socket: socket, client_address: str, replication_info: ReplicationInfo
 ) -> None:
     print(f"New connection: {client_address}")
 
@@ -169,9 +167,21 @@ def main():
     parser.add_argument(
         "--port", help="Redis server port, defaults to 6379", default=6379, type=int
     )
+    parser.add_argument(
+        "--replicaof",
+        help="Master address & port",
+        metavar=("HOST", "PORT"),
+        nargs=2,
+        default=None,
+        type=type[str],
+    )
     args = parser.parse_args()
 
-    replication_info = ReplicationInfo(role=MASTER_REPLICATION)
+    role: str = MASTER_REPLICATION
+    if args.replicaof is not None:
+        role = SLAVE_REPLICATION
+
+    replication_info = ReplicationInfo(role=role)
 
     server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
     server_socket.listen()
