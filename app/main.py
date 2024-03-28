@@ -53,11 +53,10 @@ def encode_resp(data: object) -> str:
     elif isinstance(data, bytes):  # Bulk String from bytes
         return f"${len(data)}\r\n{data.decode('utf-8')}\r\n"
     elif isinstance(data, list):  # Array
-        encoded_elements = ''.join([encode_resp(element) for element in data])
+        encoded_elements = "".join([encode_resp(element) for element in data])
         return f"*{len(data)}\r\n{encoded_elements}"
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
-        
 
 
 def unix_timestamp() -> int:
@@ -170,17 +169,34 @@ def handle_client(
     client_socket.close()
 
 
-def send_message_to_master(message: str, server_info: tuple[str, int]) -> str:
+def send_messages_to_master(messages: list[str], server_info: tuple[str, int]) -> str:
     """
     Assumess message is RESP encoded
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # tcp over ipv4
         sock.connect(server_info)
-        sock.sendall(message.encode("utf-8"))
-        response: bytes = sock.recv(512)
-
-        print(f"Master responded with {response.decode}")
+        for message in messages:
+            print(f"Sending message to master: {message}")
+            sock.sendall(message.encode("utf-8"))
+            response: bytes = sock.recv(512)
+            print(f"Master responded with {response.decode}")
     return response
+
+
+def run_slave_configuration(
+    master_host: str,
+    master_port: int,
+    own_port: int,
+) -> None:
+    master_info: tuple[str, int] = (master_host, master_port)
+
+    print("Server is in [SLAVE] mode, will try to connect to master...")
+    print(f"Pinging master over: {master_info}")
+    send_messages_to_master([
+        encode_resp(["PING"]),
+        encode_resp(["REPLCONF", "listening-port", own_port]),
+        encode_resp(["REPLCONF", "capa", "psync2"]),
+    ], master_info,)
 
 
 def start_redis_server():
@@ -200,18 +216,13 @@ def start_redis_server():
 
     role: str = MASTER_REPLICATION
     if args.replicaof is not None:
+        role = SLAVE_REPLICATION
         host, port_str = args.replicaof
         try:
             port = int(port_str)
         except ValueError:
             parser.error("PORT must be an integer")
-
-        role = SLAVE_REPLICATION
-        master_info: tuple[str, int] = (host, port)
-
-        print("Server is in [SLAVE] mode, will try to connect to master...")
-        print(f"Pinging master over: {master_info}")
-        send_message_to_master(encode_resp(["PING"]), master_info)
+        run_slave_configuration(host, port, args.port)
 
     replication_info = ReplicationInfo(role=role)
 
