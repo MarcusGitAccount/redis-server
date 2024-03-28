@@ -152,6 +152,7 @@ def main():
                 args=(client_socket, client_address),
             )
             client_thread.start()
+            thread.daemon = True
             threads.append(client_thread)
     finally:
         server_socket.close()
