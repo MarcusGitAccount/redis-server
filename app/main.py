@@ -1,5 +1,7 @@
 import socket
 import threading
+import time
+from dataclasses import dataclass, field
 
 
 def parse_resp(data, start_index=0) -> tuple[list, int]:
@@ -52,12 +54,26 @@ def encode_resp(data: object) -> str:
         # Encode a Python string as a Bulk String
         return f"${len(data)}\r\n{data}\r\n"
 
+def unix_timestamp() -> int:
+    return int(time.time_ns() / 1_000)
 
+
+MAX_32BIT_TIMESTAMP = 2**31 - 1
+
+
+@dataclass
+class ValueItem:
+    value: object
+    expiry_timestamp: int = field(init=True, default=MAX_32BIT_TIMESTAMP)
+
+not_found = ValueItem(None)
 lock = threading.Lock()
-database: dict[str, object] = dict()
+database: dict[str, ValueItem] = dict()
 
 
-def handle_client(client_socket, client_address):
+def handle_client(client_socket, 
+                  client_address,
+                  timestamp: int) -> None:
     print(f"New connection: {client_address}")
 
     while True:
@@ -82,14 +98,23 @@ def handle_client(client_socket, client_address):
             elif "set" == command:
                 key: str = data_decoded[1]
                 value: object = data_decoded[2]
+                expiry_timestamp: int = MAX_32BIT_TIMESTAMP
+
+                if len(data_decoded) == 5 and "px" == data_decoded[3]:
+                    expiry_timestamp = data_decoded[4]
+
                 with lock:
-                    database[key] = value
+                    database[key] = ValueItem(value, expiry_timestamp)
                 response = encode_resp('OK')
             elif "get" == command:
                 key: str = data_decoded[1]
                 with lock:
-                    value: object = database.get(key, None)
-                response = encode_resp(value)
+                    value_item: ValueItem = database.get(key, not_found)
+                    if value_item.value is not None and timestamp >= value_item.expiry_timestamp:
+                        value_item = None
+                        del database[key]
+                        
+                response = encode_resp(value_item.value)
 
             client_socket.send(response.encode())
 
@@ -112,8 +137,9 @@ def main():
     try:
         while True:
             client_socket, client_address = server_socket.accept()  # wait for client
+            now: int = unix_timestamp() # client connected, get timestamp
             client_thread = threading.Thread(
-                target=handle_client, args=(client_socket, client_address)
+                target=handle_client, args=(client_socket, client_address, now)
             )
             client_thread.start()
             threads.append(client_thread)
