@@ -196,6 +196,7 @@ def run_slave_configuration(
         encode_resp(["PING"]),
         encode_resp(["REPLCONF", "listening-port", str(own_port)]),
         encode_resp(["REPLCONF", "capa", "psync2"]),
+        encode_resp(["PSYNC", "?", "-1"]),
     ], master_info,)
 
 
@@ -250,7 +251,8 @@ def start_redis_server():
 
 
 if __name__ == "__main__":
-    start_redis_server()
+    # start_redis_server()
+    # print(decode_resp("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
     # print(parse_resp(":-123\r\n"))
     # resp: str ='\r\n'.join(['*2', '$4', 'echo', '$5', 'mango', ''])
     # print(resp)
