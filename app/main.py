@@ -32,7 +32,7 @@ def parse_resp(data, start_index=0) -> tuple[list, int]:
         return elements, current_index
     else:
         raise ValueError(f"Unknown RESP data type: {data_type}")
-    
+
 
 def encode_resp(data: object) -> str:
     if isinstance(data, str):  # Simple String
@@ -46,11 +46,15 @@ def encode_resp(data: object) -> str:
     elif isinstance(data, bytes):  # Bulk String from bytes
         return f"${len(data)}\r\n{data.decode('utf-8')}\r\n"
     elif isinstance(data, list):  # Array
-        encoded_elements = ''.join([encode_resp(element) for element in data])
+        encoded_elements = "".join([encode_resp(element) for element in data])
         return f"*{len(data)}\r\n{encoded_elements}"
     else:
         # Encode a Python string as a Bulk String
         return f"${len(data)}\r\n{data}\r\n"
+
+
+lock = threading.Lock()
+database: dict[str, object] = dict()
 
 
 def handle_client(client_socket, client_address):
@@ -75,7 +79,17 @@ def handle_client(client_socket, client_address):
                 response = encode_resp("PONG")
             elif "echo" == command:
                 response = encode_resp(data_decoded[1])
-                
+            elif "set" == command:
+                key: str = data_decoded[1]
+                value: object = data_decoded[2]
+                with lock:
+                    database[key] = value
+                response = 'OK'
+            elif "get" == command:
+                key: str = data_decoded[1]
+                with lock:
+                    response: object = database.get(key, None)
+
             client_socket.send(response.encode())
 
         except Exception as e:
@@ -115,3 +129,4 @@ if __name__ == "__main__":
     # print(resp)
     # print(parse_resp(resp))
     # print(parse_resp('*1\r\n$4\r\nping\r\n'))
+    # print(encode_resp(None))
