@@ -43,18 +43,18 @@ def decode_resp(data, start_index=0) -> tuple[list, int]:
 
 def encode_resp(data: object) -> str:
     if isinstance(data, str):  # Bulk String
-        return f"${len(data)}\r\n{data}\r\n"
+        return f"${len(data)}\r\n{data}\r\n".encode("utf-8")
     elif isinstance(data, Exception):  # Error
-        return f"-{str(data)}\r\n"
+        return f"-{str(data)}\r\n".encode("utf-8")
     elif isinstance(data, int):  # Integer
-        return f":{data}\r\n"
+        return f":{data}\r\n".encode("utf-8")
     elif data is None:  # Null Bulk String
-        return "$-1\r\n"
+        return "$-1\r\n".encode("utf-8")
     elif isinstance(data, bytes):  # Bulk String from bytes
-        return f"${len(data)}\r\n{data.decode('utf-8')}\r\n"
+        return f"${len(data)}\r\n{data.decode('utf-8')}"
     elif isinstance(data, list):  # Array
         encoded_elements = "".join([encode_resp(element) for element in data])
-        return f"*{len(data)}\r\n{encoded_elements}"
+        return f"*{len(data)}\r\n{encoded_elements}".encode("utf-8")
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
 
@@ -74,6 +74,9 @@ def random_str(n: int = 40) -> str:
     return random_str
 
 
+EMPTY_RDB: str = (
+    "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+)
 MAX_32BIT_TIMESTAMP = (2**31 - 1) * 1_000
 MASTER_REPLICATION: str = "master"
 SLAVE_REPLICATION: str = "slave"
@@ -163,14 +166,16 @@ def handle_client(
             elif "psync" == command:
                 replication_id: str = data_decoded[1]
                 offset: int = int(data_decoded[2], 10)
-                if replication_id == '?':
+                if replication_id == "?":
                     new_replication_id: str = random_str(n=40)
                     response: str = f"FULLRESYNC {new_replication_id} 0"
-                    multipart_response = [encode_resp(response)]
-
+                    multipart_response = [
+                        encode_resp(response),
+                        bytes.fromhex(EMPTY_RDB),
+                    ]
 
             for part in multipart_response:
-                client_socket.send(part.encode("utf-8"))
+                client_socket.send(part)
 
         except Exception as e:
             print(f"Error with {client_address}: {e}")
@@ -202,12 +207,15 @@ def run_slave_configuration(
 
     print("Server is in [SLAVE] mode, will try to connect to master...")
     print(f"Pinging master over: {master_info}")
-    send_messages_to_master([
-        encode_resp(["PING"]),
-        encode_resp(["REPLCONF", "listening-port", str(own_port)]),
-        encode_resp(["REPLCONF", "capa", "psync2"]),
-        encode_resp(["PSYNC", "?", "-1"]),
-    ], master_info,)
+    send_messages_to_master(
+        [
+            encode_resp(["PING"]),
+            encode_resp(["REPLCONF", "listening-port", str(own_port)]),
+            encode_resp(["REPLCONF", "capa", "psync2"]),
+            encode_resp(["PSYNC", "?", "-1"]),
+        ],
+        master_info,
+    )
 
 
 def start_redis_server():
@@ -262,6 +270,8 @@ def start_redis_server():
 
 if __name__ == "__main__":
     start_redis_server()
+    # a = bytes.fromhex(EMPTY_RDB)
+    # print(len(a))
     # print(decode_resp('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n'))
     # print(decode_resp("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
     # print(parse_resp(":-123\r\n"))
