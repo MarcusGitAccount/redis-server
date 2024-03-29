@@ -5,6 +5,7 @@ import argparse
 import random
 import string
 
+from collections import deque
 from pprint import pprint
 from dataclasses import dataclass, field, asdict
 
@@ -273,6 +274,7 @@ def start_redis_server():
 
 if __name__ == "__main__":
     start_redis_server()
+    # print(decode_resp("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"))
     # a = bytes.fromhex(EMPTY_RDB)
     # print(len(a))
     # print(decode_resp('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n'))
