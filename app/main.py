@@ -5,6 +5,7 @@ import argparse
 import random
 import string
 
+from collections import deque
 from pprint import pprint
 from dataclasses import dataclass, field, asdict
 
@@ -104,6 +105,7 @@ class ValueItem:
 not_found = ValueItem(None, None)
 database_lock = threading.Lock()
 database: dict[str, ValueItem] = dict()
+replica_sockets: list[socket.socket] = []
 
 
 def handle_client(
@@ -133,6 +135,9 @@ def handle_client(
             elif "echo" == command:
                 multipart_response = [encode_resp(data_decoded[1])]
             elif "set" == command:
+                for replica_socket in replica_sockets:
+                    replicate([data], replica_socket)
+
                 key: str = data_decoded[1]
                 value: object = data_decoded[2]
                 expiry_timestamp: int = MAX_32BIT_TIMESTAMP
@@ -172,8 +177,11 @@ def handle_client(
                     rdb_bytes: bytes = bytes.fromhex(EMPTY_RDB)
                     multipart_response = [
                         encode_resp(response),
-                        f"${len(rdb_bytes)}\r\n".encode('utf-8') + rdb_bytes,
+                        f"${len(rdb_bytes)}\r\n".encode("utf-8") + rdb_bytes,
                     ]
+
+                    print(f"Adding replica {client_address}")
+                    replica_sockets.append(client_socket)
 
             for part in multipart_response:
                 if not isinstance(part, bytes):
@@ -199,6 +207,15 @@ def send_messages_to_master(messages: list[str], server_info: tuple[str, int]) -
             response: bytes = sock.recv(128)
             pprint(f"Master responded with {response.decode(errors='ignore')}")
     return response
+
+
+def replicate(messages: list[str], sock: socket.socket) -> None:
+    """
+    Assumess message is RESP encoded
+    """
+    for message in messages:
+        pprint(f"Replicating {message} to {sock}")
+        sock.sendall(message.encode("utf-8"))
 
 
 def run_slave_configuration(
@@ -273,6 +290,7 @@ def start_redis_server():
 
 if __name__ == "__main__":
     start_redis_server()
+    # print(decode_resp("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"))
     # a = bytes.fromhex(EMPTY_RDB)
     # print(len(a))
     # print(decode_resp('*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n'))
