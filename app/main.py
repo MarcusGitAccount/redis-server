@@ -66,7 +66,9 @@ def unix_timestamp() -> int:
 
 def serialize_dataclass(instance) -> list[str]:
     data_dict = asdict(instance)
-    return [f"{key}:{value}" for key, value in data_dict.items()]
+    return [
+        f"{key}:{value}" for key, value in data_dict.items() if not key.startswith("__")
+    ]
 
 
 def random_str(n: int = 40) -> str:
@@ -85,6 +87,7 @@ SLAVE_REPLICATION: str = "slave"
 
 @dataclass
 class ReplicationInfo:
+    __master: tuple
     role: str = MASTER_REPLICATION
     # connected_slaves: int
     master_replid: str = field(default_factory=random_str)
@@ -150,7 +153,11 @@ def handle_client(
                 with database_lock:
                     database[key] = ValueItem(value, expiry_timestamp)
 
-                multipart_response = [encode_resp("OK")]
+                if (
+                    not replication_info.role == "slave"
+                    and not replication_info.__master == client_address
+                ):
+                    multipart_response = [encode_resp("OK")]
             elif "get" == command:
                 key: str = data_decoded[1]
                 with database_lock:
@@ -256,6 +263,7 @@ def start_redis_server():
         type=str,
     )
     args = parser.parse_args()
+    __master: tuple[str, int] = None
 
     role: str = MASTER_REPLICATION
     if args.replicaof is not None:
@@ -266,8 +274,9 @@ def start_redis_server():
         except ValueError:
             parser.error("PORT must be an integer")
         run_slave_configuration(host, port, args.port)
+        __master = (host, port)
 
-    replication_info = ReplicationInfo(role=role)
+    replication_info = ReplicationInfo(role=role, __master=__master)
 
     server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
     server_socket.listen()
