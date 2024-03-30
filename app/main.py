@@ -66,7 +66,9 @@ def unix_timestamp() -> int:
 
 def serialize_dataclass(instance) -> list[str]:
     data_dict = asdict(instance)
-    return [f"{key}:{value}" for key, value in data_dict.items()]
+    return [
+        f"{key}:{value}" for key, value in data_dict.items() if not key.startswith("__")
+    ]
 
 
 def random_str(n: int = 40) -> str:
@@ -85,6 +87,7 @@ SLAVE_REPLICATION: str = "slave"
 
 @dataclass
 class ReplicationInfo:
+    __master: tuple[str, int] = None
     role: str = MASTER_REPLICATION
     # connected_slaves: int
     master_replid: str = field(default_factory=random_str)
@@ -150,6 +153,11 @@ def handle_client(
                 with database_lock:
                     database[key] = ValueItem(value, expiry_timestamp)
 
+                print(replication_info.__master, client_address)
+                # if (
+                #     not replication_info.role == "slave"
+                #     and not replication_info.__master == client_address
+                # ):
                 multipart_response = [encode_resp("OK")]
             elif "get" == command:
                 key: str = data_decoded[1]
@@ -199,17 +207,18 @@ def handle_client(
         client_socket.close()
 
 
-def send_messages_to_master(messages: list[str], server_info: tuple[str, int]) -> str:
+def send_messages_to_master(messages: list[tuple[str, int]], server_info: tuple[str, int]) -> str:
     """
-    Assumess message is RESP encoded
+    Assumess message is RESP encoded. 1-2 messages are expected after
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # tcp over ipv4
         sock.connect(server_info)
-        for message in messages:
+        for message, expected_responses_no in messages:
             pprint(f"Sending message to master: {message}")
             sock.sendall(message.encode("utf-8"))
-            response: bytes = sock.recv(128)
-            pprint(f"Master responded with {response.decode(errors='ignore')}")
+            for _ in range(expected_responses_no):
+                response: bytes = sock.recv(128)
+                pprint(f"Master responded with {response.decode(errors='ignore')}")
     return response
 
 
@@ -232,13 +241,13 @@ def run_slave_configuration(
     print("Server is in [SLAVE] mode, will try to connect to master...")
     print(f"Pinging master over: {master_info}")
     send_messages_to_master(
-        [
-            encode_resp(["PING"]),
-            encode_resp(["REPLCONF", "listening-port", str(own_port)]),
-            encode_resp(["REPLCONF", "capa", "psync2"]),
-            encode_resp(["PSYNC", "?", "-1"]),
+         messages=[
+            (encode_resp(["PING"]), 1),
+            (encode_resp(["REPLCONF", "listening-port", str(own_port)]), 1),
+            (encode_resp(["REPLCONF", "capa", "psync2"]), 1),
+            (encode_resp(["PSYNC", "?", "-1"]), 2) # response and RDB file
         ],
-        master_info,
+        server_info=master_info,
     )
 
 
@@ -256,6 +265,7 @@ def start_redis_server():
         type=str,
     )
     args = parser.parse_args()
+    __master: tuple[str, int] = None
 
     role: str = MASTER_REPLICATION
     if args.replicaof is not None:
@@ -266,8 +276,10 @@ def start_redis_server():
         except ValueError:
             parser.error("PORT must be an integer")
         run_slave_configuration(host, port, args.port)
+        __master = (host, port)
 
     replication_info = ReplicationInfo(role=role)
+    replication_info.__master = __master
 
     server_socket = socket.create_server(("localhost", args.port), reuse_port=True)
     server_socket.listen()
@@ -309,5 +321,5 @@ if __name__ == "__main__":
     """
                     1711644520407554
     expiry_timestamp=1711644520407654
-                    1711644520410214
+                     1711644520410214
     """
