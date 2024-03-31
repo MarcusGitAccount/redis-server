@@ -54,7 +54,7 @@ def encode_resp(data: object) -> str:
     elif isinstance(data, bytes):  # Bulk String from bytes
         return f"${len(data)}\r\n{data.decode('utf-8', errors='ignore')}"
     elif isinstance(data, list):  # Array
-        encoded_elements = "".join([encode_resp(element) for element in data])
+        encoded_elements = "".join([str(encode_resp(str)) for element in data])
         return f"*{len(data)}\r\n{encoded_elements}"
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
@@ -305,7 +305,7 @@ def handle_master_conn(
                         data
                     )
                 elif command[0].lower() == "replconf":
-                    response: list = encode_resp(["REPLCONF", "ACK", "0",])
+                    response: list = encode_resp(["REPLCONF", "ACK", str(processed_bytes_count),])
                     master_socket.send(response.encode("utf-8"))
             processed_bytes_count += len(data)
         except Exception as e:
