@@ -275,34 +275,41 @@ def handle_master_conn(
     """
     # Continue listening for messages from master
     while True:
-        incoming_message = master_socket.recv(1024)
+        try:
+            incoming_message = master_socket.recv(1024)
 
-        if not incoming_message:
-            print("Connection closed by master...")
+            if not incoming_message:
+                print("Connection closed by master...")
+                break
+
+            timestamp = unix_timestamp()
+            data = incoming_message.decode(errors="ignore")
+
+            log_data: str = data.replace("\r\n", "\\r\\n")
+            print(f"Raw data: {log_data}")
+            commands = decode_multiple_resp_commands(data)
+            pprint(f"Received from master replication commands: {commands}")
+
+            for command in commands:
+                if command[0].lower() == "set":
+                    handle_set(
+                        command,
+                        None,
+                        None,
+                        replica_sockets,
+                        database_lock,
+                        database,
+                        None,
+                        timestamp,
+                        data
+                    )
+                elif command[0].lower() == "replconf":
+                    response: list = encode_resp(["REPLCONF", "ACK", 0])
+                    master_socket.send(response.encode("utf-8"))
+        except Exception as e:
+            print(f"Error with master connection...")
             break
 
-        timestamp = unix_timestamp()
-        data = incoming_message.decode(errors="ignore")
-
-        log_data: str = data.replace("\r\n", "\\r\\n")
-        print(f"Raw data: {log_data}")
-        commands = decode_multiple_resp_commands(data)
-
-        pprint(f"Received from master replication command:s {commands}")
-
-        for command in commands:
-            if command[0].lower() == "set":
-                handle_set(
-                    command,
-                    None,
-                    None,
-                    replica_sockets,
-                    database_lock,
-                    database,
-                    None,
-                    timestamp,
-                    data,
-                )
     master_socket.close()
 
 
