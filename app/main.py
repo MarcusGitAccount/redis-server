@@ -303,6 +303,10 @@ def handle_master_conn(
                     timestamp,
                     data,
                 )
+            elif command[0].lower() == "replconf":
+                response: list = encode_resp(["REPLCONF", "ACK", 0])
+                master_socket.send(response.encode("utf-8"))
+
     master_socket.close()
 
 
