@@ -305,7 +305,7 @@ def handle_master_conn(
                         data
                     )
                 elif command[0].lower() == "replconf":
-                    response: list = encode_resp(["REPLCONF", "ACK", "0")
+                    response: list = encode_resp(["REPLCONF", "ACK", "0"])
                     master_socket.send(response.encode("utf-8"))
             processed_bytes_count += len(data)
         except Exception as e:
