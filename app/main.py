@@ -274,6 +274,7 @@ def handle_master_conn(
     Assumess message is RESP encoded. 1-2 messages are expected after
     """
     # Continue listening for messages from master
+    processed_bytes_count: int = 0
     while True:
         try:
             incoming_message = master_socket.recv(1024)
@@ -306,6 +307,7 @@ def handle_master_conn(
                 elif command[0].lower() == "replconf":
                     response: list = encode_resp(["REPLCONF", "ACK", str(0)])
                     master_socket.send(response.encode("utf-8"))
+            processed_bytes_count += len(data)
         except Exception as e:
             print(f"Error with master connection...")
             break
