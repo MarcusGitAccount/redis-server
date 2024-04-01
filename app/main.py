@@ -60,7 +60,7 @@ def encode_resp(data: object) -> str:
         raise TypeError(f"Unsupported data type: {type(data)}")
 
 
-def decode_multiple_resp_commands(data: str) -> list[list[str]]:
+def decode_multiple_resp_commands(data: str) -> list[list[tuple[str, int]]]:
     index = 0
     result = []
     while index < len(data):
@@ -68,8 +68,8 @@ def decode_multiple_resp_commands(data: str) -> list[list[str]]:
             curr, next_index = decode_resp(data, start_index=index)
         except:
             break
+        result.append((curr, len(data[index:next_index].encode("utf-8"))))
         index = next_index
-        result.append(curr)
     return result
 
 
@@ -291,7 +291,7 @@ def handle_master_conn(
             commands = decode_multiple_resp_commands(data)
             pprint(f"Received from master replication commands: {commands}")
 
-            for command in commands:
+            for command, bytes_size in commands:
                 if command[0].lower() == "set":
                     handle_set(
                         command,
@@ -302,12 +302,18 @@ def handle_master_conn(
                         database,
                         None,
                         timestamp,
-                        data
+                        data,
                     )
                 elif command[0].lower() == "replconf":
-                    response: list = encode_resp(["REPLCONF", "ACK", "0",])
+                    response: list = encode_resp(
+                        [
+                            "REPLCONF",
+                            "ACK",
+                            str(processed_bytes_count),
+                        ]
+                    )
                     master_socket.send(response.encode("utf-8"))
-            processed_bytes_count += len(data)
+                processed_bytes_count += bytes_size
         except Exception as e:
             print(f"Error with master connection...")
             break
