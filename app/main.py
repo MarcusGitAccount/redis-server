@@ -180,6 +180,10 @@ def handle_replconf():
     return encode_resp("OK")
 
 
+def handle_wait():
+    return encode_resp(0)
+
+
 def handle_psync(data_decoded, client_address, client_socket, replica_sockets):
     replication_id = data_decoded[1]
     if replication_id == "?":
@@ -240,6 +244,8 @@ def handle_client(
                 response = handle_get(data_decoded, database_lock, database, timestamp)
             elif command == "info":
                 response = handle_info(replication_info)
+            elif command == "wait":
+                response = handle_wait()
             elif command == "replconf":
                 response = handle_replconf()
             elif command == "psync":
