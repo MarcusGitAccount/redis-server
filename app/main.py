@@ -181,7 +181,8 @@ def handle_replconf():
 
 
 def handle_wait():
-    return encode_resp(0)
+    print(f"Replicas connected: {replica_sockets}")
+    return encode_resp(len(replica_sockets))
 
 
 def handle_psync(data_decoded, client_address, client_socket, replica_sockets):
