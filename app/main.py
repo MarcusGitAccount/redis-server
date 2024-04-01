@@ -112,6 +112,17 @@ class ReplicationInfo:
 
 
 @dataclass
+class Replica:
+    socket: socket.socket
+    expected_offset: int = 0
+    last_offset: int = 0
+
+    def send(self, data: bytes):
+        self.socket.sendall(data)
+        self.expected_offset += len(data)
+
+
+@dataclass
 class ValueItem:
     value: object
     expiry_timestamp: int = field(init=True, default=MAX_32BIT_TIMESTAMP)
@@ -119,8 +130,9 @@ class ValueItem:
 
 not_found = ValueItem(None, None)
 database_lock = threading.Lock()
+replica_sockets_lock = threading.Lock()
 database: dict[str, ValueItem] = dict()
-replica_sockets: list[socket.socket] = []
+replica_sockets: list[Replica] = []
 
 
 def handle_ping():
@@ -176,13 +188,51 @@ def handle_info(replication_info):
     return encode_resp("\n".join(serialize_dataclass(replication_info)))
 
 
-def handle_replconf():
+def handle_replconf(
+    data_decoded: list, replica_sockets: list[Replica], client_socket: socket.socket
+):
+    with replica_sockets_lock:
+        if len(data_decoded) == 3 and "ack" == data_decoded[1].lower():
+            offset_received: int = int(data_decoded[2])
+
+            replica_clients = [
+                replica
+                for replica in replica_sockets
+                if replica.socket == client_socket
+            ]
+            if len(replica_sockets) != 1:
+                raise Exception("Replica not found")
+            replica_client = replica_clients[0]
+            replica_client.last_offset = offset_received
+            print(
+                f"New last offset received ({offset_received}) for replica {replica_client}"
+            )
+            return None
+
     return encode_resp("OK")
 
 
-def handle_wait():
-    print(f"Replicas connected: {replica_sockets}")
-    return encode_resp(len(replica_sockets))
+def handle_wait(
+    data_encoded: list[object], replica_sockets: list[Replica], start_timestamp: int
+) -> str:
+    with replica_sockets_lock:
+        min_replicas_ack: int = int(data_encoded[1])
+        wait_time: int = int(data_encoded[2])
+        end: int = start_timestamp + wait_time
+        ack_replicas: int = sum(
+            1 if replica.last_offset == replica.expected_offset else 0
+            for replica in replica_sockets
+        )
+
+        if unix_timestamp() >= end or ack_replicas >= min_replicas_ack:
+            return encode_resp(ack_replicas)
+
+        command: str = encode_resp(["REPLCONF", "GETACK", "*"]).encode("utf-8")
+        for replica in replica_sockets:
+            replica.send()
+
+        print(f"Replicas connected: {replica_sockets}")
+        return handle_wait(data_encoded, replica_sockets, start_timestamp)
 
 
 def handle_psync(data_decoded, client_address, client_socket, replica_sockets):
@@ -191,7 +241,7 @@ def handle_psync(data_decoded, client_address, client_socket, replica_sockets):
         new_replication_id = random_str(n=40)
         response = f"FULLRESYNC {new_replication_id} 0"
         rdb_bytes = bytes.fromhex(EMPTY_RDB)
-        replica_sockets.append(client_socket)
+        replica_sockets.append(Replica(socket=client_socket))
         return [
             encode_resp(response),
             f"${len(rdb_bytes)}\r\n".encode("utf-8") + rdb_bytes,
@@ -246,9 +296,9 @@ def handle_client(
             elif command == "info":
                 response = handle_info(replication_info)
             elif command == "wait":
-                response = handle_wait()
+                response = handle_wait(data_decoded, replica_sockets, timestamp)
             elif command == "replconf":
-                response = handle_replconf()
+                response = handle_replconf(data_decoded, replica_sockets, client_socket)
             elif command == "psync":
                 response = handle_psync(
                     data_decoded, client_address, client_socket, replica_sockets
@@ -328,13 +378,13 @@ def handle_master_conn(
     master_socket.close()
 
 
-def replicate(messages: list[str], sock: socket.socket) -> None:
+def replicate(messages: list[str], replica: Replica) -> None:
     """
     Assumess message is RESP encoded
     """
     for message in messages:
-        pprint(f"Replicating {message} to {sock}")
-        sock.sendall(message.encode("utf-8"))
+        pprint(f"Replicating {message} to {replica}")
+        replica.send(message.encode("utf-8"))
 
 
 def start_redis_server():
